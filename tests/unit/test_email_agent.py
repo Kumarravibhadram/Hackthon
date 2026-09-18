@@ -1,4 +1,4 @@
-from backend.agents.email_agent import EmailAgent
+from backend.agents.email_agent import EmailAgent, _outlook_sender_email
 from backend.core.models import AgentContext
 
 
@@ -26,6 +26,24 @@ def test_email_agent_reads_local_outlook_mail(monkeypatch) -> None:
     assert "Sam Lee" in result
 
 
+def test_outlook_sender_email_resolves_exchange_sender() -> None:
+    class ExchangeUser:
+        PrimarySmtpAddress = "sam@example.com"
+
+    sender = type(
+        "Sender",
+        (),
+        {"GetExchangeUser": lambda self: ExchangeUser()},
+    )()
+
+    class Message:
+        SenderEmailAddress = "/o=EXORG/ou=Exchange/cn=Recipients/cn=sam"
+        SenderEmailType = "EX"
+        Sender = sender
+
+    assert _outlook_sender_email(Message()) == "sam@example.com"
+
+
 def test_email_agent_extracts_action_items(monkeypatch) -> None:
     monkeypatch.setattr(
         "backend.agents.email_agent._read_outlook_mailbox",
@@ -48,6 +66,22 @@ def test_email_agent_drafts_reply_for_matching_sender(monkeypatch) -> None:
 
     assert "Draft reply for Sam Lee" in result
     assert "Regards" in result
+
+
+def test_email_agent_drafts_new_email_from_instructions(monkeypatch) -> None:
+    monkeypatch.setattr("backend.agents.email_agent._read_outlook_mailbox", lambda unread_only=True: [])
+    monkeypatch.setattr(
+        "backend.agents.email_agent._ai_new_draft",
+        lambda instruction: "Subject: Account review\n\nHello,\n\nPlease review the account.\n\nRegards,\nSampath",
+    )
+
+    result = EmailAgent().run(
+        AgentContext(session_id="session-new-draft", message="Draft a new email: ask the team to review the account")
+    )
+
+    assert result.startswith("New email draft:")
+    assert "Subject: Account review" in result
+    assert "Please review the account" in result
 
 
 def test_email_agent_uses_openai_draft_when_available(monkeypatch) -> None:

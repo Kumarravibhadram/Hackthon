@@ -22,13 +22,28 @@ class Settings:
     openai_embedding_dimension: int = int(os.getenv("OPENAI_EMBEDDING_DIMENSION", "1536"))
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+    langsmith_tracing: bool = os.getenv("LANGCHAIN_TRACING_V2", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    langsmith_api_key: str = os.getenv("LANGCHAIN_API_KEY", "")
+    langsmith_project: str = os.getenv("LANGCHAIN_PROJECT", "bank-employee-ai")
+    langsmith_endpoint: str = os.getenv("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
+    langsmith_trace_content: bool = os.getenv("LANGSMITH_TRACE_CONTENT", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     vector_store_backend: str = os.getenv("VECTOR_STORE_BACKEND", "chroma")
-    database_url: str = os.getenv("DATABASE_URL", "")
-    vector_table: str = os.getenv("VECTOR_TABLE", "document_chunks")
     vector_store_path: str = os.getenv("VECTOR_STORE_PATH", "data/vector_store")
     vector_collection: str = os.getenv("VECTOR_COLLECTION", "banking_knowledge")
+    database_url: str = os.getenv("DATABASE_URL", "")
     jira_base_url: str = os.getenv("JIRA_BASE_URL", "")
     confluence_base_url: str = os.getenv("CONFLUENCE_BASE_URL", "")
+    confluence_space_key: str = os.getenv("CONFLUENCE_SPACE_KEY", "")
     jira_email: str = os.getenv("JIRA_EMAIL", "")
     jira_api_token: str = os.getenv("JIRA_API_TOKEN", "")
     jira_project_key: str = os.getenv("JIRA_PROJECT_KEY", "")

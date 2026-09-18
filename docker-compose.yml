@@ -12,6 +12,7 @@ services:
       VECTOR_STORE_BACKEND: chroma
       VECTOR_STORE_PATH: /app/data/vector_store
       VECTOR_COLLECTION: banking_knowledge
+      DATABASE_URL: postgresql://bankai:bankai@postgres:5432/bankai
       AZURE_SEARCH_ENDPOINT: ${AZURE_SEARCH_ENDPOINT:-}
       AZURE_SEARCH_INDEX: ${AZURE_SEARCH_INDEX:-}
       AZURE_SEARCH_KEY: ${AZURE_SEARCH_KEY:-}
@@ -35,6 +36,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
@@ -45,6 +48,15 @@ services:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
     ports:
       - "3000:3000"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bankai
+      POSTGRES_PASSWORD: bankai
+      POSTGRES_DB: bankai
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -67,5 +79,6 @@ services:
 
 volumes:
   redis_data:
+  postgres_data:
   frontend_node_modules:
   frontend_next:

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
+    agent: str | None = Field(default=None, min_length=1)
 
 
 class ChatResponse(BaseModel):

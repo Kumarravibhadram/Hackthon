@@ -84,8 +84,8 @@ header = FancyBboxPatch((0.2, 10.15), 17.6, 0.75, boxstyle="round,pad=0.02,round
 ax.add_patch(header)
 ax.text(1.0, 10.55, "BANK", fontsize=16, fontweight="bold", color="white")
 ax.text(1.0, 10.32, "Bank Employee AI Workspace", fontsize=14, fontweight="bold", color="white")
-ax.text(6.0, 10.55, "Streamlined Architecture", fontsize=16, fontweight="bold", color="white")
-ax.text(6.0, 10.28, "Focused on Email, Meetings, Jira/Confluence, Document Q&A and General Assistance", fontsize=9, color="#e7f3ff")
+ax.text(6.0, 10.55, "Current Runtime Architecture", fontsize=16, fontweight="bold", color="white")
+ax.text(6.0, 10.28, "MailMate, MeetMate, Jira/Confluence, Document Analysis, RAG and AskBank", fontsize=9, color="#e7f3ff")
 
 badge = FancyBboxPatch((15.2, 10.22), 2.0, 0.5, boxstyle="round,pad=0.02,rounding_size=0.12", linewidth=0, facecolor="#c7ddec")
 ax.add_patch(badge)
@@ -108,9 +108,9 @@ add_left_list_box(
         "Jira & Confluence",
         "Document Q&A",
         "Dashboard",
-        "Search",
-        "Settings",
-        "Role-based Access (SSO)",
+        "Unread mail search",
+        "Draft and send email",
+        "No active SSO/RBAC yet",
     ],
     fc="#cbeadf",
     ec="#1f5d7a",
@@ -125,14 +125,12 @@ add_box(3.4, 5.5, 4.2, 4.4, "API & Application Layer\n(FastAPI)", "", fc="#d5f0d
 api_items = [
     "Chat API routes",
     "Email API routes",
-    "Meeting API routes",
-    "Jira/Confluence API routes",
-    "Document API routes",
+    "Calendar via agent",
+    "Jira/Confluence via agent",
+    "Document upload + analysis",
     "Dashboard API routes",
-    "Authentication & Authorization",
-    "CORS + Middleware",
-    "Rate Limiting",
-    "Request Logging",
+    "CORS + request middleware",
+    "Stable error responses",
 ]
 for idx, item in enumerate(api_items):
     y_pos = 8.45 - idx * 0.44
@@ -141,13 +139,11 @@ for idx, item in enumerate(api_items):
 # Supervisor
 add_box(8.2, 5.5, 4.0, 4.4, "LangGraph Supervisor\n(Agent Orchestrator)", "", fc="#f5e7cd", ec="#d5a63f", title_size=13)
 supervisor_items = [
-    "Understand intent",
-    "Select agent",
-    "Retrieve knowledge",
-    "Synthesize response",
-    "Manage context & memory",
-    "Apply guardrails and policies",
-    "Generate final response",
+    "Classify request",
+    "Retrieve approved knowledge",
+    "Route to specialist",
+    "Return user-facing response",
+    "No persistent session memory",
 ]
 for idx, item in enumerate(supervisor_items):
     y_pos = 8.1 - idx * 0.44
@@ -156,11 +152,11 @@ for idx, item in enumerate(supervisor_items):
 # Specialist agents
 add_box(12.7, 5.5, 3.1, 4.4, "Specialist Agents\n(Essential)", "", fc="#f8dada", ec="#d45b6a", title_size=13)
 agent_items = [
-    "Email Agent",
-    "Meeting Agent",
-    "Jira/Confluence Agent",
-    "Document Agent",
-    "Assistant Agent",
+    "MailMate\nOutlook / Graph",
+    "MeetMate\nOutlook / Graph / local calendar",
+    "JiraPilot + Confluence Coach",
+    "Document Analyzer",
+    "AskBank\nOpenAI / Ollama",
 ]
 for idx, item in enumerate(agent_items):
     y_pos = 8.45 - idx * 0.62
@@ -171,30 +167,30 @@ add_box(16.1, 5.5, 1.8, 4.4, "External Services\n& Integrations", "", fc="#dfeaf
 
 # External services contents
 services = [
-    "Microsoft Outlook",
-    "Microsoft Teams",
+    "Classic Outlook / Graph Mail",
+    "Teams launcher",
     "Jira",
     "Confluence",
-    "Azure AI Foundry",
-    "PostgreSQL",
-    "Redis",
+    "OpenAI embeddings",
+    "Ollama",
+    "Local JSON calendar",
 ]
 for idx, item in enumerate(services):
     y_pos = 8.45 - idx * 0.52
     ax.text(17.0, y_pos, item, fontsize=7.5, color="#0f172a", ha="center", va="center")
 
 # Knowledge and retrieval layer
-add_box(7.0, 2.1, 5.1, 1.8, "Knowledge & Retrieval\n(RAG Layer)", "KnowledgeRetriever\n• Searches approved knowledge sources\n• Returns relevant passages with citations\n• Supports metadata filtering and retrieval", fc="#dce6ff", ec="#4f46e5", title_size=12, body_size=8)
+add_box(7.0, 2.1, 5.1, 1.8, "Knowledge & Retrieval\n(RAG Layer)", "KnowledgeRetriever\n• Loads approved documents\n• Chroma + FAISS when embeddings are configured\n• Lexical fallback with citations\n• Metadata filtering", fc="#dce6ff", ec="#4f46e5", title_size=12, body_size=8)
 
 # Sources panel
 sources = [
     "Internal Knowledge Base\n• Policies & procedures\n• Process documents\n• Architecture & API contracts",
     "Incoming Documents\n• PDF, Word, Excel, PPT\n• Meeting notes\n• Circulars & Memos",
-    "Email Data (via Graph API)\n• Inbox (employee's emails)\n• Sent items\n• Attachments\n• Metadata",
-    "Meeting Data (via Teams)\n• Calendar events\n• Meeting transcripts\n• Recordings files\n• Attendees, dates, invites",
-    "Confluence Data\n• BRD / Requirement docs\n• Design documents\n• Project pages\n• Comments & sprint data",
-    "Jira Data\n• Projects\n• Issues\n• Comments\n• Sprint data",
-    "Vector Store / Index\n• Text embeddings\n• Metadata\n• Access control\n• RAG corpus",
+    "Mail Sources\n• Classic Outlook COM\n• Microsoft Graph\n• Inbox metadata and bodies",
+    "Calendar Sources\n• Outlook calendar\n• Microsoft Graph\n• Local workspace calendar",
+    "Confluence\n• Search and page retrieval\n• Page creation and updates\n• Ingestion into RAG",
+    "Jira\n• JQL issue search\n• Story analysis\n• Task/story creation",
+    "Vector Store / Index\n• ChromaDB embeddings\n• FAISS cosine search\n• Local chunks fallback",
 ]
 
 source_x_start = 0.3
@@ -204,12 +200,12 @@ for idx, text in enumerate(sources):
     add_box(x, 0.25, source_w, 1.45, "", text, fc="#dff3d7", ec="#5aa75a", title_color="#0f172a", body_color="#0f172a", title_size=8, body_size=7, linewidth=1.1)
 
 # Bottom utility boxes
-add_box(0.5, 0.15, 2.2, 0.85, "", "Security, Governance,\n& Observability", fc="#eadbf5", ec="#8b5cf6", title_size=10, body_size=8)
-add_box(2.9, 0.15, 2.4, 0.85, "", "Authentication (Azure AD)\nRole-based Access (RBAC)\nData Privacy & PII Protection", fc="#e7e1ff", ec="#8b5cf6", title_size=10, body_size=8)
-add_box(5.5, 0.15, 2.3, 0.85, "", "Audit Logs\nContent Filtering & Guardrails\nAI safety checks", fc="#e7e1ff", ec="#8b5cf6", title_size=10, body_size=8)
-add_box(8.0, 0.15, 2.3, 0.85, "", "Deployment & Infrastructure\nDocker Compose (POC)\nAzure (Production)", fc="#e7e1ff", ec="#8b5cf6", title_size=10, body_size=8)
-add_box(10.5, 0.15, 2.2, 0.85, "", "Monitoring & Analytics\nLogging / Prompt tracing\nScalability & High Availability", fc="#e7e1ff", ec="#8b5cf6", title_size=10, body_size=8)
-add_box(12.9, 0.15, 4.2, 0.85, "", "Outcome & Benefits\n• Efficient meeting management\n• Automated user story creation\n• Easy access to enterprise knowledge", fc="#e7e1ff", ec="#8b5cf6", title_size=10, body_size=8)
+add_box(0.5, 0.15, 2.2, 0.85, "", "Local privacy boundary\nMailbox data stays in the\nconfigured integration", fc="#eadbf5", ec="#8b5cf6", title_size=10, body_size=8)
+add_box(2.9, 0.15, 2.4, 0.85, "", "Configuration\n.env settings\nProvider credentials", fc="#e7e1ff", ec="#8b5cf6", title_size=10, body_size=8)
+add_box(5.5, 0.15, 2.3, 0.85, "", "Request middleware\nRequest IDs\nTiming + error logging", fc="#e7e1ff", ec="#8b5cf6", title_size=10, body_size=8)
+add_box(8.0, 0.15, 2.3, 0.85, "", "Development\nDocker Compose\nLocal uvicorn + Next.js", fc="#e7e1ff", ec="#8b5cf6", title_size=10, body_size=8)
+add_box(10.5, 0.15, 2.2, 0.85, "", "Storage\nChromaDB / JSON chunks\nUploaded documents", fc="#e7e1ff", ec="#8b5cf6", title_size=10, body_size=8)
+add_box(12.9, 0.15, 4.2, 0.85, "", "Current outcome\nOperational employee workspace\nwith live integration fallbacks", fc="#e7e1ff", ec="#8b5cf6", title_size=10, body_size=8)
 
 # arrows between main blocks
 add_arrow((7.6, 6.7), (8.2, 6.7), text="requests", color="#334155", lw=1.5)

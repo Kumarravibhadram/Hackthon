@@ -20,6 +20,10 @@ def test_supervisor_routes_mailmate_and_latest_mail_requests_to_email() -> None:
     assert classify_request({"message": "Read my latest mail"})["route"] == "email"
 
 
+def test_supervisor_honors_explicit_confluence_agent_context() -> None:
+    assert classify_request({"message": "Find the onboarding decision", "agent": "confluence"})["route"] == "confluence"
+
+
 def test_supervisor_keeps_assistant_responses_user_facing() -> None:
     result = Supervisor().handle("session-3", "what are policies for home loan")
 

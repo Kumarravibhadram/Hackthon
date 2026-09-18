@@ -7,6 +7,7 @@ import httpx
 from backend.agents.base import Agent
 from backend.app.config import settings
 from backend.core.models import AgentContext
+from backend.core.ai_controls import guard_input, guard_output, track_llm_run
 
 
 class AssistantAgent(Agent):
@@ -23,6 +24,7 @@ class AssistantAgent(Agent):
             )
 
     def _call_llm(self, message: str) -> str:
+        message = guard_input(message)
         expanded = bool(re.search(r"\b(more|detail|detailed|explain further|elaborate|deep dive)\b", message, re.IGNORECASE))
         word_limit = 500 if expanded else 200
         provider = settings.llm_provider.casefold().strip() or "openai"
@@ -72,4 +74,12 @@ class AssistantAgent(Agent):
             response.raise_for_status()
             answer = response.json()["choices"][0]["message"]["content"]
 
-        return str(answer).strip()
+        answer = guard_output(str(answer))
+        track_llm_run(
+            "askbank.chat",
+            provider=provider,
+            model=settings.ollama_model if provider == "ollama" else model,
+            input_text=message,
+            output_text=answer,
+        )
+        return answer

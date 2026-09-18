@@ -24,6 +24,14 @@ def test_html_to_text_strips_confluence_markup() -> None:
     assert "<" not in body
 
 
+def test_html_to_text_removes_macro_noise_and_preserves_blocks() -> None:
+    html = '<h1>Features</h1><ac:structured-macro ac:name="toc"><ac:parameter>default</ac:parameter></ac:structured-macro><p>Access workspace insights.</p><script>tracking()</script>'
+
+    body = html_to_text(html)
+
+    assert body == "Features\nAccess workspace insights."
+
+
 def test_fetch_confluence_page_reads_page_content(monkeypatch) -> None:
     def fake_get(url: str, **kwargs):
         assert url == "https://hackthoncp.atlassian.net/wiki/rest/api/content/655361"

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 class AgentContext:
     session_id: str
     message: str
+    agent: str | None = None
     retrieved_sources: list[str] = field(default_factory=list)
     retrieved_chunks: list["RetrievedChunk"] = field(default_factory=list)
     agent_outputs: dict[str, str] = field(default_factory=dict)
@@ -28,6 +29,7 @@ class RetrievedChunk:
     content: str
     score: float
     page: int | None = None
+    metadata: dict[str, str] = field(default_factory=dict)
 
     @property
     def citation(self) -> str:

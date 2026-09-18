@@ -1,8 +1,11 @@
 """Approved knowledge search endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+import httpx
 from pydantic import BaseModel, Field
 
+from backend.app.config import settings
+from backend.knowledge.loaders import ingest_confluence_page
 from backend.knowledge.retriever import KnowledgeRetriever
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -11,11 +14,20 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 class KnowledgeSearchRequest(BaseModel):
     query: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=20)
+    metadata_filter: dict[str, str] | None = None
+
+
+class ConfluenceIngestRequest(BaseModel):
+    page_url: str = Field(min_length=1)
 
 
 @router.post("/search")
 def search_knowledge(request: KnowledgeSearchRequest) -> dict[str, object]:
-    chunks = KnowledgeRetriever().search(request.query, top_k=request.top_k)
+    chunks = KnowledgeRetriever().search(
+        request.query,
+        top_k=request.top_k,
+        metadata_filter=request.metadata_filter,
+    )
     return {
         "query": request.query,
         "results": [
@@ -25,7 +37,24 @@ def search_knowledge(request: KnowledgeSearchRequest) -> dict[str, object]:
                 "content": chunk.content,
                 "score": chunk.score,
                 "page": chunk.page,
+                "metadata": chunk.metadata,
             }
             for chunk in chunks
         ],
     }
+
+
+@router.post("/confluence/ingest")
+def ingest_knowledge_from_confluence(request: ConfluenceIngestRequest) -> dict[str, object]:
+    try:
+        path = ingest_confluence_page(
+            request.page_url,
+            base_url=settings.confluence_base_url or settings.jira_base_url,
+            email=settings.jira_email,
+            api_token=settings.jira_api_token,
+        )
+        chunks = KnowledgeRetriever().rebuild_store()
+    except (ValueError, OSError, httpx.HTTPError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    return {"status": "indexed", "source": str(path), "chunks": len(chunks)}

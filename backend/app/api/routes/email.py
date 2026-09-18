@@ -38,7 +38,7 @@ def list_messages(
 @router.post("/send")
 def send_email(request: EmailSendRequest) -> dict[str, str]:
     try:
-        send_outlook_email(request.recipient, request.subject, request.body)
+        provider = send_outlook_email(request.recipient, request.subject, request.body)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"status": "sent", "recipient": request.recipient}
+    return {"status": "sent", "recipient": request.recipient, "provider": provider}

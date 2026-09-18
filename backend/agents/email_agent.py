@@ -8,6 +8,7 @@ import httpx
 from backend.agents.base import Agent
 from backend.app.config import settings
 from backend.core.models import AgentContext
+from backend.core.ai_controls import guard_input, guard_output, track_llm_run
 from backend.integrations.graph_mail import GraphMailClient, GraphMailError
 
 
@@ -21,6 +22,7 @@ def _openai_email_completion(instruction: str, email_text: str, max_tokens: int 
 
     base_url = (getattr(settings, "openai_base_url", "") or "https://api.openai.com/v1").rstrip("/")
     model = getattr(settings, "llm_model", "gpt-4o-mini") or "gpt-4o-mini"
+    instruction = guard_input(instruction)
     response = httpx.post(
         f"{base_url}/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
@@ -39,7 +41,15 @@ def _openai_email_completion(instruction: str, email_text: str, max_tokens: int 
         timeout=45.0,
     )
     response.raise_for_status()
-    return str(response.json()["choices"][0]["message"]["content"]).strip()
+    answer = guard_output(str(response.json()["choices"][0]["message"]["content"]))
+    track_llm_run(
+        "mailmate.llm",
+        provider="openai",
+        model=model,
+        input_text=instruction,
+        output_text=answer,
+    )
+    return answer
 
 
 def _email_prompt_data(emails: list[dict[str, str]]) -> str:
@@ -91,6 +101,20 @@ def _ai_draft(email: dict[str, str]) -> str | None:
         return None
 
 
+def _ai_new_draft(instruction: str) -> str | None:
+    try:
+        return _openai_email_completion(
+            "Write a professional new email based on the user's instructions. "
+            "Infer a concise subject line and include it as the first line using the format "
+            "Subject: <subject>. Then write only the email body with a greeting and sign-off. "
+            "Do not invent names, dates, commitments, attachments, or facts.",
+            instruction,
+            max_tokens=700,
+        )
+    except (httpx.HTTPError, KeyError, TypeError, ValueError):
+        return None
+
+
 def _priority(email: dict[str, str]) -> str:
     importance = str(email.get("importance", "")).lower()
     body = str(email.get("body", "")).lower()
@@ -107,6 +131,34 @@ def _body_text(email: dict[str, str]) -> str:
     body = re.sub(r"https?://\S+", " ", body, flags=re.IGNORECASE)
     body = re.sub(r"<[^>]+>", " ", body)
     return " ".join(body.replace("\r", " ").replace("\n", " ").split())
+
+
+def _outlook_sender_email(item: object) -> str:
+    address = str(getattr(item, "SenderEmailAddress", "") or "").strip()
+    if address and str(getattr(item, "SenderEmailType", "")).upper() != "EX":
+        return address
+
+    sender = getattr(item, "Sender", None)
+    try:
+        exchange_user = sender.GetExchangeUser() if sender is not None else None
+        smtp_address = str(getattr(exchange_user, "PrimarySmtpAddress", "") or "").strip()
+        if smtp_address:
+            return smtp_address
+    except Exception:
+        pass
+
+    try:
+        accessor = getattr(sender, "PropertyAccessor", None)
+        if accessor is not None:
+            smtp_address = str(
+                accessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x39FE001E") or ""
+            ).strip()
+            if smtp_address:
+                return smtp_address
+    except Exception:
+        pass
+
+    return address
 
 
 def _summarize_action(sentence: str) -> str:
@@ -196,7 +248,7 @@ def _read_outlook_mailbox(*, unread_only: bool = True) -> list[dict[str, str]] |
                         {
                             "subject": getattr(item, "Subject", "(no subject)"),
                             "sender": getattr(item, "SenderName", "Unknown sender"),
-                            "sender_email": getattr(item, "SenderEmailAddress", ""),
+                            "sender_email": _outlook_sender_email(item),
                             "received_at": getattr(item, "ReceivedTime", ""),
                             "body": getattr(item, "Body", "") or "",
                             "importance": getattr(item, "Importance", ""),
@@ -217,11 +269,17 @@ def _read_outlook_mailbox(*, unread_only: bool = True) -> list[dict[str, str]] |
         pythoncom.CoUninitialize()
 
 
-def send_outlook_email(recipient: str, subject: str, body: str) -> None:
+def send_outlook_email(recipient: str, subject: str, body: str) -> str:
+    recipient = recipient.strip()
+    subject = subject.strip()
+    body = body.strip()
+    if not recipient or not subject or not body:
+        raise RuntimeError("Recipient, subject, and message body are required to send email")
+
     if settings.mail_provider == "graph":
         try:
             GraphMailClient().send_message(recipient, subject, body)
-            return
+            return "Microsoft Graph"
         except GraphMailError as exc:
             if not settings.allow_outlook_fallback:
                 raise RuntimeError(str(exc)) from exc
@@ -234,14 +292,37 @@ def send_outlook_email(recipient: str, subject: str, body: str) -> None:
 
     pythoncom.CoInitialize()
     try:
-        outlook = win32com.client.Dispatch("Outlook.Application")
+        dispatch_errors: list[str] = []
+        outlook = None
+        for factory_name in ("Dispatch", "DispatchEx"):
+            try:
+                factory = getattr(win32com.client, factory_name)
+                outlook = factory("Outlook.Application")
+                break
+            except Exception as exc:
+                dispatch_errors.append(f"{factory_name}: {exc}")
+        if outlook is None:
+            detail = " | ".join(dispatch_errors)
+            raise RuntimeError(f"Classic Outlook could not be opened. {detail}")
+        namespace = outlook.GetNamespace("MAPI")
+        accounts = namespace.Accounts
+        if getattr(accounts, "Count", 0) < 1:
+            raise RuntimeError("Classic Outlook has no configured sending account")
+
         message = outlook.CreateItem(0)
         message.To = recipient
         message.Subject = subject
         message.Body = body
+        try:
+            message.SendUsingAccount = accounts.Item(1)
+        except Exception:
+            pass
         message.Send()
+        return "Classic Outlook"
     except Exception as exc:
-        raise RuntimeError("Outlook could not send the email") from exc
+        if isinstance(exc, RuntimeError):
+            raise
+        raise RuntimeError(f"Classic Outlook could not send the email: {exc}") from exc
     finally:
         pythoncom.CoUninitialize()
 
@@ -300,6 +381,26 @@ class EmailAgent(Agent):
         if search_query.lower() in {"my emails", "emails", "messages", "mail"}:
             search_query = ""
         draft_request = "draft" in prompt_lower or "reply" in prompt_lower
+        new_draft_request = bool(
+            re.search(r"\b(?:draft|write|compose)\s+(?:a\s+)?(?:new\s+)?email\b", prompt_lower)
+        ) and "reply" not in prompt_lower
+        if new_draft_request:
+            instruction = re.sub(
+                r"^\s*(?:email request\s*:\s*)?(?:please\s+)?(?:draft|write|compose)\s+(?:a\s+)?(?:new\s+)?email\s*[:\-]?\s*",
+                "",
+                prompt,
+                flags=re.IGNORECASE,
+            ).strip() or "Write a professional workplace email."
+            ai_draft = _ai_new_draft(instruction)
+            if ai_draft:
+                return f"New email draft:\n\n{ai_draft}"
+            return (
+                "New email draft:\n\n"
+                "Subject: Follow-up\n\n"
+                "Hello,\n\n"
+                f"{instruction}\n\n"
+                "Regards,\nSampath"
+            )
         emails = (
             _read_mailbox(unread_only=False, search_query=search_query)
             if search_query

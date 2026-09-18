@@ -1,26 +1,63 @@
 # Bank Employee AI Workspace
 
-A multi-agent workspace for bank employees. The system routes requests through an AI supervisor to specialist agents, retrieves trusted knowledge, and returns functional, technical, and executive views.
+A bank employee workspace with a Next.js frontend, FastAPI backend, LangGraph request routing, live mailbox/calendar integrations, Jira and Confluence workflows, document analysis, approved-knowledge retrieval, and AskBank general assistance.
 
 ## Project layout
 
 - `frontend/`: employee chat and dashboard UI
-- `backend/`: API, supervisor, specialist agents, RAG, and synthesis
+- `backend/`: FastAPI API, LangGraph supervisor, specialist agents, integrations, and RAG
 - `data/`: source documents and vector-index artifacts
-- `tests/`: unit, integration, and end-to-end tests
+- `tests/`: backend unit and integration tests
 - `docs/`: architecture and API notes
+- `generate_architecture_diagram.py`: source for `architecture_diagram.png` and `architecture_diagram.svg`
 
-## Suggested next steps
+## Technology stack
 
-1. Choose the backend framework and LLM provider.
-2. Implement the supervisor contract in `backend/orchestrator/supervisor.py`.
-3. Add agent implementations under `backend/agents/`.
-4. Connect the frontend chat client to the backend API.
-5. Add approved bank policies to `data/knowledge_base/`.
+- **Frontend**: Next.js App Router, React, TypeScript, `lucide-react`, and CSS with responsive workspace layouts.
+- **Backend API**: Python 3.13, FastAPI, Pydantic, Uvicorn, HTTPX, and `python-dotenv` configuration.
+- **Orchestration**: LangGraph supervisor with specialist agents for MailMate, MeetMate, Jira/Confluence, Document Analyzer, and AskBank.
+- **AI providers**: OpenAI-compatible chat and embedding APIs, with Ollama supported for local chat inference.
+- **Knowledge and RAG**: document loaders, ChromaDB persistent storage, FAISS CPU cosine search, NumPy, and lexical retrieval fallback.
+- **Mailbox and calendar**: Classic Outlook desktop COM through `pywin32`, Microsoft Graph through MSAL, and a local JSON calendar fallback.
+- **Jira and Confluence**: Atlassian REST APIs through HTTPX, optional `atlassian-python-api`, and optional LangChain Confluence loading.
+- **Document processing**: `pypdf`, `python-docx`, `openpyxl`, `python-pptx`, Pillow, and Tesseract OCR through `pytesseract`.
+- **Testing and quality**: pytest and Ruff configuration through `pyproject.toml`.
+- **Infrastructure**: Docker Compose with backend, frontend, PostgreSQL, and Redis services. PostgreSQL and Redis are provisioned for the workspace stack; current knowledge artifacts are stored locally in the `data/` directory.
+
+## Current capabilities
+
+- **MailMate**: unread mailbox loading/search, email selection, AI summaries, action extraction, new email drafts, reply drafts, copy/edit, and send through Classic Outlook or Microsoft Graph.
+- **MeetMate**: upcoming calendar reads, meeting creation, local calendar fallback, and Microsoft Teams launching.
+- **JiraPilot**: JQL issue search, story analysis, and task/story creation.
+- **Confluence Coach**: page search, page retrieval, page creation/update, and knowledge-base ingestion.
+- **Document Analyzer**: upload and analyze PDF, Word, Excel, PowerPoint, text, JSON, HTML, and image files.
+- **Knowledge Hub**: approved-document retrieval with ChromaDB/FAISS when embeddings are configured and lexical fallback otherwise.
+- **AskBank**: general Q&A through OpenAI-compatible APIs or Ollama.
 
 ## Development
 
-The scaffold is intentionally framework-neutral. Keep secrets in `.env` and use `.env.example` as the shared configuration contract.
+Keep secrets in `.env` and use `.env.example` as the shared configuration contract. The current implementation has request IDs, CORS, and stable error responses, but authentication, RBAC, persistent chat sessions, rate limiting, and audit storage are not yet active.
+
+## Local development
+
+Install backend dependencies and start the API:
+
+```powershell
+python -m pip install -r backend/requirements.txt
+python -m uvicorn backend.app.main:app --reload --port 8000
+```
+
+Start the frontend in another terminal:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. The frontend defaults to `http://localhost:8000/api/v1`; set `NEXT_PUBLIC_API_BASE_URL` when the backend uses another port, for example `http://localhost:8001/api/v1`.
+
+Health check: `http://localhost:8000/health`.
 
 ## Run with Docker Compose
 
@@ -35,7 +72,7 @@ docker compose up --build
 - PostgreSQL: `localhost:5432`
 - Redis: `localhost:6379`
 
-Azure AI Search and Azure AI Foundry remain external services and are configured through `.env`.
+Azure AI Search is optional and configured through `.env`. The current Docker Compose stack includes the backend, frontend, PostgreSQL, and Redis; the application currently uses local file/vector storage for knowledge artifacts.
 
 ### Embedding-backed RAG
 
@@ -60,8 +97,17 @@ Rebuild the index after adding or changing approved documents:
 python scripts/ingest.py
 ```
 
-Without `OPENAI_API_KEY`, development falls back to the local JSON chunk store and lexical retrieval;
-it does not claim to provide vector similarity search.
+Without `OPENAI_API_KEY`, development falls back to local chunks and lexical retrieval; it does not claim to provide vector similarity search.
+
+## Architecture diagram
+
+Regenerate the diagram after architecture changes:
+
+```powershell
+python generate_architecture_diagram.py
+```
+
+This writes `architecture_diagram.png` and `architecture_diagram.svg` at the repository root.
 
 ## Microsoft Graph calendar
 
@@ -82,7 +128,7 @@ terminal. Complete that sign-in once; the MSAL token cache is reused for later c
 
 ## Microsoft Graph mail
 
-MailMate uses Microsoft Graph as its primary mailbox integration. Register the same public-client Entra ID application
+MailMate can use Microsoft Graph or Classic Outlook desktop COM. Configure `MAIL_PROVIDER=graph` for Microsoft Graph, or leave the default `outlook` for local Classic Outlook access. For Graph, register the same public-client Entra ID application
 with delegated `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, and `User.Read` permissions, then configure:
 
 ```env
@@ -92,6 +138,19 @@ GRAPH_MAIL_SCOPES=Mail.Read Mail.ReadWrite Mail.Send User.Read
 MAIL_IMPORTANT_SENDERS=ceo@bank.example,manager@bank.example
 ```
 
-The first mail request starts device authentication in the backend terminal. MailMate reads the current user's mailbox,
+The first Graph mail request starts device authentication in the backend terminal. MailMate reads the current user's mailbox,
 returns the latest email on request, and triages every message by read state, relevance, sender importance,
 attachments, and action needed. Set `ALLOW_OUTLOOK_FALLBACK=false` to require Graph and disable local Outlook COM.
+
+For Classic Outlook, Outlook desktop must be installed, open, and signed in on the same Windows user session as the backend. The backend uses the existing Outlook profile and does not require a mailbox password.
+
+## API surface
+
+- `GET /health`
+- `POST /api/v1/chat/sessions/{session_id}/messages`
+- `GET /api/v1/dashboard/summary`
+- `GET /api/v1/email/messages`
+- `POST /api/v1/email/send`
+- `POST /api/v1/documents/upload`
+- `POST /api/v1/knowledge/search`
+- `POST /api/v1/knowledge/confluence/ingest`

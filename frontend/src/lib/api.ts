@@ -1,10 +1,10 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
-export async function sendMessage(sessionId: string, message: string) {
+export async function sendMessage(sessionId: string, message: string, agent?: string) {
   const response = await fetch(`${API_BASE_URL}/chat/sessions/${sessionId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, agent }),
   });
 
   if (!response.ok) {
@@ -12,6 +12,17 @@ export async function sendMessage(sessionId: string, message: string) {
   }
 
   return response.json() as Promise<{ session_id: string; answer: string; route?: string }>;
+}
+
+export async function ingestConfluencePage(pageUrl: string) {
+  const response = await fetch(`${API_BASE_URL}/knowledge/confluence/ingest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ page_url: pageUrl }),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(payload?.detail ?? "Unable to ingest Confluence page");
+  return payload as { status: string; source: string; chunks: number };
 }
 
 export async function sendEmail(recipient: string, subject: string, body: string) {
@@ -26,7 +37,7 @@ export async function sendEmail(recipient: string, subject: string, body: string
     throw new Error(detail?.detail ?? "Unable to send email");
   }
 
-  return response.json() as Promise<{ status: string; recipient: string }>;
+  return response.json() as Promise<{ status: string; recipient: string; provider: string }>;
 }
 
 export async function getEmailMessages(unreadOnly = true, query = "") {

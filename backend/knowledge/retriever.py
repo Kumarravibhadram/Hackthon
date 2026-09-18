@@ -13,119 +13,6 @@ from backend.core.models import RetrievedChunk
 from backend.knowledge.loaders import DocumentChunk, load_chunks
 
 
-class PgVectorChunkStore:
-    def __init__(self, table_name: str | None = None) -> None:
-        self.database_url = settings.database_url
-        self.table_name = table_name or settings.vector_table
-
-    def _connect(self):
-        try:
-            import psycopg
-        except ImportError as exc:
-            raise RuntimeError("psycopg is required for pgvector storage") from exc
-        return psycopg.connect(self.database_url)
-
-    def ensure_schema(self) -> None:
-        if not self.database_url:
-            raise RuntimeError("DATABASE_URL is required for pgvector storage")
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-                cur.execute(
-                    f"""
-                    CREATE TABLE IF NOT EXISTS {self.table_name} (
-                        chunk_id text PRIMARY KEY,
-                        source text NOT NULL,
-                        content text NOT NULL,
-                        page integer,
-                        embedding vector({settings.openai_embedding_dimension})
-                    )
-                    """
-                )
-
-    def write_chunks(self, chunks: list[DocumentChunk], embeddings: list[list[float]]) -> None:
-        if not self.database_url:
-            return
-        if len(chunks) != len(embeddings):
-            raise ValueError("Each document chunk must have one embedding")
-        self.ensure_schema()
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                for chunk, embedding in zip(chunks, embeddings):
-                    cur.execute(
-                        f"""
-                        INSERT INTO {self.table_name} (chunk_id, source, content, page, embedding)
-                        VALUES (%s, %s, %s, %s, %s::vector)
-                        ON CONFLICT (chunk_id)
-                        DO UPDATE SET source = EXCLUDED.source, content = EXCLUDED.content, page = EXCLUDED.page
-                        """,
-                        (
-                            chunk.chunk_id,
-                            chunk.source,
-                            chunk.content,
-                            chunk.page,
-                            "[" + ",".join(str(value) for value in embedding) + "]",
-                        ),
-                    )
-
-    def has_embeddings(self) -> bool:
-        if not self.database_url:
-            return False
-        self.ensure_schema()
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT EXISTS (SELECT 1 FROM {self.table_name} WHERE embedding IS NULL)"
-                )
-                has_missing = cur.fetchone()[0]
-        return not has_missing
-
-    def read_chunks(self) -> list[DocumentChunk]:
-        if not self.database_url:
-            return []
-        self.ensure_schema()
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT chunk_id, source, content, page FROM {self.table_name} ORDER BY source, page"
-                )
-                rows = cur.fetchall()
-        return [
-            DocumentChunk(chunk_id=row[0], source=row[1], content=row[2], page=row[3])
-            for row in rows
-        ]
-
-    def search(self, embedding: list[float], top_k: int) -> list[RetrievedChunk]:
-        if not self.database_url:
-            return []
-        self.ensure_schema()
-        vector = "[" + ",".join(str(value) for value in embedding) + "]"
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    SELECT chunk_id, source, content, page,
-                           1 - (embedding <=> %s::vector) AS score
-                    FROM {self.table_name}
-                    WHERE embedding IS NOT NULL
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                    """,
-                    (vector, vector, top_k),
-                )
-                rows = cur.fetchall()
-        return [
-            RetrievedChunk(
-                chunk_id=row[0],
-                source=row[1],
-                content=row[2],
-                score=float(row[4]),
-                page=row[3],
-            )
-            for row in rows
-        ]
-
-
 class EmbeddingProvider(Protocol):
     def embed(self, text: str) -> list[float]: ...
 
@@ -194,6 +81,7 @@ class ChromaFaissVectorStore:
                 source=str(metadata.get("source", "unknown")),
                 content=document,
                 page=metadata.get("page"),
+                metadata={str(key): str(value) for key, value in metadata.items() if key not in {"source", "page"}},
             )
             for chunk_id, document, metadata in zip(ids, documents, metadatas)
         ]
@@ -214,7 +102,7 @@ class ChromaFaissVectorStore:
             documents=[chunk.content for chunk in chunks],
             embeddings=embeddings,
             metadatas=[
-                {"source": chunk.source, "page": chunk.page if chunk.page is not None else -1}
+                {"source": chunk.source, "page": chunk.page if chunk.page is not None else -1, **chunk.metadata}
                 for chunk in chunks
             ],
         )
@@ -248,6 +136,11 @@ class ChromaFaissVectorStore:
                     content=documents[position],
                     score=float(score),
                     page=None if page in (None, -1) else int(page),
+                    metadata={
+                        str(key): str(value)
+                        for key, value in metadata.items()
+                        if key not in {"source", "page"}
+                    },
                 )
             )
         return results
@@ -329,7 +222,7 @@ class LocalLexicalRetriever:
 
         reranked = self.reranker.rerank(query, scored)
         return [
-            RetrievedChunk(chunk.chunk_id, chunk.source, chunk.content, score, chunk.page)
+            RetrievedChunk(chunk.chunk_id, chunk.source, chunk.content, score, chunk.page, chunk.metadata)
             for score, chunk in reranked[:top_k]
         ]
 
@@ -349,26 +242,20 @@ class KnowledgeRetriever:
     def __init__(self, knowledge_root: Path | None = None, search_client: AzureSearchClient | None = None) -> None:
         root = knowledge_root or Path("data/knowledge_base")
         self.knowledge_root = root
+        use_persistent_store = knowledge_root is None
         self.search_client = search_client
         if self.search_client is None and settings.azure_search_endpoint and settings.azure_search_index:
             self.search_client = AzureSearchClient(settings.azure_search_endpoint, settings.azure_search_index)
         self.chunk_store_path = (root / ".vector_store" / "chunks.json").resolve()
         self.vector_store: ChromaFaissVectorStore | None = None
-        if settings.vector_store_backend.lower() in {"chroma", "chromadb", "faiss"}:
+        if use_persistent_store and settings.vector_store_backend.lower() in {"chroma", "chromadb", "faiss"}:
             try:
                 self.vector_store = ChromaFaissVectorStore()
             except RuntimeError:
                 self.vector_store = None
-        self.pg_store = (
-            PgVectorChunkStore()
-            if settings.vector_store_backend.lower() == "pgvector" and settings.database_url
-            else None
-        )
         self.embedding_provider: OpenAIEmbeddingProvider | None = None
-        if (self.pg_store is not None or self.vector_store is not None) and settings.openai_api_key:
+        if self.vector_store is not None and settings.openai_api_key:
             self.embedding_provider = OpenAIEmbeddingProvider()
-        elif self.pg_store is not None:
-            self.pg_store = None
         elif self.vector_store is not None:
             self.vector_store = None
         self.chunks = self._load_or_rebuild_chunks(root)
@@ -383,14 +270,6 @@ class KnowledgeRetriever:
             except Exception:
                 self.vector_store = None
 
-        if self.pg_store is not None:
-            try:
-                chunks = self.pg_store.read_chunks()
-                if chunks and (self.embedding_provider is None or self.pg_store.has_embeddings()):
-                    return chunks
-            except Exception:
-                self.pg_store = None
-
         if self.chunk_store_path.exists():
             data = json.loads(self.chunk_store_path.read_text(encoding="utf-8"))
             if data:
@@ -400,6 +279,7 @@ class KnowledgeRetriever:
                         source=item["source"],
                         content=item["content"],
                         page=item.get("page"),
+                        metadata=item.get("metadata", {}),
                     )
                     for item in data
                 ]
@@ -416,13 +296,6 @@ class KnowledgeRetriever:
             self.vector_store.write_chunks(chunks, embeddings)
             return
 
-        if self.pg_store is not None:
-            if self.embedding_provider is None:
-                raise RuntimeError("OPENAI_API_KEY is required to write pgvector embeddings")
-            embeddings = self.embedding_provider.embed_many([chunk.content for chunk in chunks])
-            self.pg_store.write_chunks(chunks, embeddings)
-            return
-
         self.chunk_store_path.parent.mkdir(parents=True, exist_ok=True)
         payload = [
             {
@@ -430,6 +303,7 @@ class KnowledgeRetriever:
                 "source": chunk.source,
                 "content": chunk.content,
                 "page": chunk.page,
+                "metadata": chunk.metadata,
             }
             for chunk in chunks
         ]
@@ -442,19 +316,36 @@ class KnowledgeRetriever:
         self._write_chunks(chunks)
         return chunks
 
-    def search(self, query: str, top_k: int = 5) -> list[RetrievedChunk]:
+    def search(self, query: str, top_k: int = 5, metadata_filter: dict[str, str] | None = None) -> list[RetrievedChunk]:
         if not query.strip():
             return []
+        semantic_results: list[RetrievedChunk] = []
         if self.vector_store is not None and self.embedding_provider is not None:
             try:
-                return self.vector_store.search(self.embedding_provider.embed(query), top_k)
+                semantic_results = self.vector_store.search(self.embedding_provider.embed(query), top_k * 2)
             except Exception:
                 pass
-        if self.pg_store is not None and self.embedding_provider is not None:
+        elif self.search_client is not None:
             try:
-                return self.pg_store.search(self.embedding_provider.embed(query), top_k)
+                semantic_results = self.search_client.search(query, top_k * 2)
             except Exception:
                 pass
-        if self.search_client is not None:
-            return self.search_client.search(query, top_k)
-        return self.local.search(query, top_k)
+
+        lexical_results = self.local.search(query, top_k * 2)
+        results = self._fuse_results(semantic_results, lexical_results) if semantic_results else lexical_results
+        if metadata_filter:
+            results = [
+                result for result in results
+                if all(result.metadata.get(key) == value for key, value in metadata_filter.items())
+            ]
+        return results[:top_k]
+
+    @staticmethod
+    def _fuse_results(*result_sets: list[RetrievedChunk]) -> list[RetrievedChunk]:
+        fused: dict[str, tuple[RetrievedChunk, float]] = {}
+        for result_set in result_sets:
+            for rank, result in enumerate(result_set, start=1):
+                reciprocal_rank = 1.0 / (60 + rank)
+                current = fused.get(result.chunk_id)
+                fused[result.chunk_id] = (result, (current[1] if current else 0.0) + reciprocal_rank)
+        return [result for result, _score in sorted(fused.values(), key=lambda item: item[1], reverse=True)]

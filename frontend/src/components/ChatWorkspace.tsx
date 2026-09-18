@@ -57,6 +57,18 @@ type MeetingPreview = {
   location: string;
 };
 
+type ConfluenceDetails = {
+  title: string;
+  pageId: string;
+  source: string;
+};
+
+type ConfluenceResult = {
+  title: string;
+  pageId: string;
+  preview: string;
+};
+
 const agents: Array<{
   id: AgentId;
   name: string;
@@ -136,7 +148,6 @@ const navItems = [
   { id: "knowledge", label: "Knowledge Hub", icon: BookOpen },
   { id: "jira", label: "Jira", icon: FolderOpen },
   { id: "confluence", label: "Confluence", icon: BookOpen },
-  { id: "calendar", label: "Calendar", icon: CalendarDays },
 ];
 
 const detailPanelsByAgent = {
@@ -171,21 +182,21 @@ const detailPanelsByAgent = {
   jira: {
     title: "Jira Details",
     detailItems: [
-      { label: "Sprint", value: "Sprint 24" },
-      { label: "Board", value: "Retail Banking Platform" },
-      { label: "Open Items", value: "12 tickets" },
-      { label: "Priority", value: "High" },
+      { label: "Project", value: "Waiting for live Jira data" },
+      { label: "Status", value: "Not loaded yet" },
+      { label: "Recent issue", value: "-" },
+      { label: "Updated", value: "-" },
     ],
     summary:
-      "The current sprint has several high-priority items tied to the onboarding flow and reporting pipeline, with a few blockers still awaiting engineering review.",
+      "Live Jira issues will appear here once the workspace loads project activity from the configured Jira project.",
     actionItems: [
-      "Prioritize onboarding flow tickets for the next release (Owner: Product)",
-      "Escalate pipeline blocker to engineering (Owner: You)",
+      "Load recent project activity to review active work items.",
+      "Check the Jira issue list for the latest status, owner, and updated timestamp.",
     ],
     draftLines: [
       "Hi team,",
-      "I’ve reviewed the sprint board and flagged the onboarding and reporting blockers for follow-up.",
-      "Please confirm owners and ETA by end of day.",
+      "I’m waiting on the live Jira issue feed to confirm the current project status and open work.",
+      "I’ll follow up once the latest items are loaded.",
       "Best,",
       "Sampath",
     ],
@@ -193,24 +204,14 @@ const detailPanelsByAgent = {
   confluence: {
     title: "Confluence Details",
     detailItems: [
-      { label: "Page", value: "Customer verification policy" },
-      { label: "Updated", value: "Sep 08, 2026" },
-      { label: "Status", value: "Approved" },
-      { label: "Related", value: "3 linked pages" },
+      { label: "Page", value: "No live page selected" },
+      { label: "Page ID", value: "-" },
+      { label: "Source", value: "Waiting for Confluence" },
+      { label: "Status", value: "Not loaded" },
     ],
-    summary:
-      "The approved Confluence page for customer verification was updated recently and includes the latest approval workflow and step-by-step guidance.",
-    actionItems: [
-      "Share the latest approved page with the operations team (Owner: You)",
-      "Review related procedures for any cross-links (Owner: Ops)",
-    ],
-    draftLines: [
-      "Hi ops team,",
-      "I found the updated customer verification guidance and aligned it with the latest approval steps.",
-      "Please review the shared page before the next training session.",
-      "Thanks,",
-      "Sampath",
-    ],
+    summary: "Search Confluence to load a live page and its current content.",
+              actionItems: ["Search Confluence pages to load live content and page details."],
+    draftLines: ["A live Confluence page is required before preparing a response."],
   },
   document: {
     title: "Document Analyzer Details",
@@ -261,7 +262,7 @@ const detailPanelsByAgent = {
     detailItems: [
       { label: "Mode", value: "General Q&A" },
       { label: "Capabilities", value: "Policy, procedures, and process guidance" },
-      { label: "Context", value: "Northstar Bank workspace" },
+      { label: "Context", value: "Nexa Bank workspace" },
       { label: "Status", value: "Ready" },
     ],
     summary:
@@ -299,9 +300,7 @@ const initialMessagesByAgent: Record<string, Message[]> = {
   meeting: [
     { id: 1, role: "assistant", text: "I can help you plan meetings, generate agendas, and track action items. What would you like to schedule?", time: "10:24 AM" },
   ],
-  jira: [
-    { id: 1, role: "assistant", text: "I can review Jira tickets, summarize open work, and help prioritize backlog items for the next sprint.", time: "10:24 AM" },
-  ],
+  jira: [],
   confluence: [
     { id: 1, role: "assistant", text: "I can search your Confluence pages and summarize relevant policies, updates, and decisions quickly.", time: "10:24 AM" },
   ],
@@ -384,6 +383,78 @@ function parseEmailRows(answer: string): EmailRow[] {
   return rows;
 }
 
+function parseConfluenceDetails(answer: string): ConfluenceDetails | null {
+  const pageLine = answer.split(/\r?\n/).find((line) => line.match(/^[-*]\s+.+\s+\(Page ID:\s*[^)]+\)/));
+  if (!pageLine) return null;
+  const match = pageLine.match(/^[-*]\s+(.+?)\s+\(Page ID:\s*([^)]+)\)/);
+  if (!match) return null;
+  return { title: match[1].trim(), pageId: match[2].trim(), source: "Live Confluence page" };
+}
+
+function parseConfluenceResults(answer: string): ConfluenceResult[] {
+  const lines = answer.split(/\r?\n/);
+  const results: ConfluenceResult[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^[-*]\s+(.+?)\s+\(Page ID:\s*([^)]+)\)/);
+    if (!match) continue;
+    const nextLine = lines[index + 1]?.trim() ?? "";
+    results.push({
+      title: match[1].trim(),
+      pageId: match[2].trim(),
+      preview: nextLine && !nextLine.startsWith("-") ? nextLine : "Live Confluence page",
+    });
+  }
+  return results;
+}
+
+function parseConfluencePageContent(answer: string): string {
+  const lines = answer.split(/\r?\n/);
+  if (!lines.some((line) => line.trim() === "### Confluence Page")) return "";
+  const pageLineIndex = lines.findIndex((line) => /^[-*]\s+.+\s+\(Page ID:\s*[^)]+\)/.test(line));
+  return pageLineIndex >= 0 ? lines.slice(pageLineIndex + 1).join(" ").replace(/\s+/g, " ").trim() : "";
+}
+
+function buildConfluenceSummary(content: string): string {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (!normalized) return "The selected Confluence page has no readable body content.";
+  const words = normalized.split(" ");
+  if (words.length <= 220) return normalized;
+  return `${words.slice(0, 220).join(" ")}...`;
+}
+
+function buildConfluenceActionItems(content: string): string[] {
+  const items = content
+    .split(/(?<=[.!?])\s+|\s{2,}/)
+    .map((item) => item.trim().replace(/^[-*]\s*/, ""))
+    .filter((item) => item.length > 12 && /\b(must|shall|should|required|acceptance|target date|next step|action|review|validate|work tracker)\b/i.test(item));
+  return [...new Set(items)].slice(0, 3);
+}
+
+function buildJiraDetailSummary(issues: JiraIssue[]): string {
+  if (!issues.length) {
+    return "No live Jira issues were returned for this workspace.";
+  }
+
+  const recent = issues[0];
+  const uniqueProjects = [...new Set(issues.map((issue) => issue.project).filter(Boolean))];
+  const openCount = issues.filter((issue) => !/done|closed|resolved/i.test(issue.status)).length;
+  const blockerCount = issues.filter((issue) => /blocker/i.test(issue.summary) || /blocker/i.test(issue.status)).length;
+  const bugCount = issues.filter((issue) => /bug/i.test(issue.summary) || /bug/i.test(issue.status)).length;
+
+  return `Live Jira data shows ${issues.length} result${issues.length === 1 ? "" : "s"} across ${uniqueProjects.length || 1} project${uniqueProjects.length === 1 ? "" : "s"}. Most recent: ${recent.key} — ${recent.summary} (${recent.status}) in ${recent.project}, updated ${recent.updated}. Open items: ${openCount}; blockers: ${blockerCount}; bugs: ${bugCount}.`;
+}
+
+function buildJiraActionItems(issues: JiraIssue[]): string[] {
+  if (!issues.length) {
+    return ["No live Jira action items were returned."];
+  }
+
+  return issues.slice(0, 3).map((issue) => {
+    const label = /blocker/i.test(issue.summary) ? "Blocker" : /bug/i.test(issue.summary) ? "Bug" : "Issue";
+    return `${label}: ${issue.key} — ${issue.summary} (${issue.status}; owner: ${issue.assignee}; updated: ${issue.updated})`;
+  });
+}
+
 export function ChatWorkspace() {
   const [selectedNav, setSelectedNav] = useState("ai-agents");
   const [selectedAgent, setSelectedAgent] = useState<AgentId>("assistant");
@@ -396,6 +467,8 @@ export function ChatWorkspace() {
   const [emailDraftLines, setEmailDraftLines] = useState<string[]>([]);
   const [meetingPreview, setMeetingPreview] = useState<MeetingPreview[]>([]);
   const [confluencePreview, setConfluencePreview] = useState<string[]>([]);
+  const [confluenceDetails, setConfluenceDetails] = useState<ConfluenceDetails | null>(null);
+  const [confluencePageContent, setConfluencePageContent] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [taskFilter, setTaskFilter] = useState<"all" | "in-progress" | "pending" | "completed">("all");
   const [tasks, setTasks] = useState(initialTasks);
@@ -454,7 +527,7 @@ export function ChatWorkspace() {
             { label: "Attachments", value: selectedEmail.attachments || "None" },
           ],
           summary: selectedEmail.summary || "No message preview was returned.",
-          actionItems: emailActionItems.length ? emailActionItems : ["Use Show Action Items to analyze this email."],
+          actionItems: emailActionItems.length ? emailActionItems : ["Action items are available in the chat response."],
           draftLines: emailDraftLines.length ? emailDraftLines : ["Use Draft Responses to generate a reply."],
         }
       : {
@@ -466,18 +539,58 @@ export function ChatWorkspace() {
             { label: "Priority", value: "-" },
             { label: "Attachments", value: "-" },
           ],
-          summary: "Search or load your mailbox to see actual email information here.",
+          summary: emailDraftLines.length
+            ? "A new email draft is ready for review and editing."
+            : "Search or load your mailbox to see actual email information here.",
           actionItems: ["Select an email to view its action items."],
-          draftLines: ["Select an email to generate a reply draft."],
+          draftLines: emailDraftLines.length ? emailDraftLines : ["Select an email to generate a reply draft."],
         }
-    : baseDetail;
+    : selectedAgent === "jira" && jiraIssues.length > 0
+      ? {
+          ...baseDetail,
+          detailItems: [
+            { label: "Issues", value: `${jiraIssues.length} loaded` },
+            { label: "Project", value: [...new Set(jiraIssues.map((issue) => issue.project))].join(", ") || "N/A" },
+            { label: "Statuses", value: [...new Set(jiraIssues.map((issue) => issue.status))].join(", ") || "N/A" },
+            { label: "Assignees", value: [...new Set(jiraIssues.map((issue) => issue.assignee))].join(", ") || "N/A" },
+          ],
+          summary: buildJiraDetailSummary(jiraIssues),
+          actionItems: buildJiraActionItems(jiraIssues),
+          draftLines: jiraIssues.slice(0, 3).map((issue) => `Follow up on ${issue.key}: ${issue.summary} (${issue.status})`),
+        }
+      : selectedAgent === "confluence" && confluenceDetails
+        ? {
+            ...baseDetail,
+            detailItems: [
+              { label: "Page", value: confluenceDetails.title },
+              { label: "Page ID", value: confluenceDetails.pageId },
+              { label: "Source", value: confluenceDetails.source },
+              { label: "Status", value: "Retrieved" },
+            ],
+            summary: buildConfluenceSummary(confluencePageContent),
+            actionItems: buildConfluenceActionItems(confluencePageContent).length
+              ? buildConfluenceActionItems(confluencePageContent)
+              : ["No action items were identified in this page."],
+            draftLines: [
+              `Follow up on “${confluenceDetails.title}”.`,
+              buildConfluenceSummary(confluencePageContent),
+            ],
+          }
+        : selectedAgent === "confluence"
+          ? {
+              ...baseDetail,
+              summary: "No live Confluence page is loaded. Search recent pages and select a result to view its details.",
+              actionItems: ["Search Confluence pages for a topic or recent workspace update.", "Open a result to retrieve the complete live page content."],
+              draftLines: ["Load a live Confluence page before preparing a response."],
+            }
+        : baseDetail;
 
   const filteredAgents = agents;
 
   const visibleAgents = selectedNav === "documents"
     ? filteredAgents.filter((agent) => agent.id === "document")
     : workspaceHome
-      ? filteredAgents
+      ? filteredAgents.filter((agent) => agent.id !== "jira" && agent.id !== "confluence")
       : filteredAgents.filter((agent) => agent.id === selectedAgent);
 
   const filteredTasks = useMemo(() => {
@@ -543,7 +656,7 @@ export function ChatWorkspace() {
     const [meetingResult, jiraResult, confluenceResult] = await Promise.allSettled([
       sendMessage("dashboard-session", "Show upcoming calendar meetings."),
       sendMessage("dashboard-session", "Show my recently updated Jira issues"),
-      sendMessage("dashboard-session", "Search Confluence pages for recent workspace updates"),
+      sendMessage("dashboard-session", "Search Confluence pages for recent workspace updates", "confluence"),
     ]);
 
     if (meetingResult.status === "fulfilled") {
@@ -582,15 +695,18 @@ export function ChatWorkspace() {
     setIsLoading(true);
 
     try {
-      // The API receives only this message, so preserve the selected workspace context.
-      const requestMessage = selectedAgent === "email" ? `Email request: ${trimmed}` : trimmed;
-      const result = await sendMessage("employee-session", requestMessage);
+      const requestMessage = selectedAgent === "email"
+        ? `Email request: ${trimmed}`
+        : selectedAgent === "confluence" && confluenceDetails
+          ? `Confluence page ${confluenceDetails.pageId}: ${trimmed}`
+          : trimmed;
+      const result = await sendMessage("employee-session", requestMessage, selectedAgent);
       let displayedAnswer = result.answer;
       if (result.route === "email" || selectedAgent === "email") {
         const parsedRows = parseEmailRows(result.answer);
         if (parsedRows.length) {
           setEmailRows(parsedRows);
-          setSelectedEmail((current) => current ?? parsedRows[0]);
+          setSelectedEmail(parsedRows[0]);
           displayedAnswer = `Found ${parsedRows.length} email${parsedRows.length === 1 ? "" : "s"}. Select a message below to view details.`;
         }
         if (trimmed.toLowerCase().includes("action item")) {
@@ -606,15 +722,27 @@ export function ChatWorkspace() {
           setEmailActionItems(items);
         }
         if (trimmed.toLowerCase().includes("draft") || trimmed.toLowerCase().includes("reply")) {
-          const draftHeading = result.answer.indexOf("Draft reply for");
+          const draftHeading = result.answer.search(/(?:Draft reply for|New email draft:)/i);
           const draftStart = draftHeading >= 0 ? result.answer.indexOf("\n\n", draftHeading) : result.answer.indexOf("\n\n");
           const draft = draftStart >= 0 ? result.answer.slice(draftStart + 2) : result.answer;
           setEmailDraftLines(draft.split(/\r?\n/).filter(Boolean));
-          displayedAnswer = "Draft response prepared. Review it in the email details panel.";
+          displayedAnswer = result.answer.toLowerCase().includes("new email draft")
+            ? "New email draft prepared. Review and edit it before sending."
+            : "Draft response prepared. Review it in the email details panel.";
         }
       }
       if (selectedAgent === "jira") {
         setJiraIssues(parseJiraIssues(result.answer));
+      }
+      if (selectedAgent === "confluence") {
+        const pageDetails = parseConfluenceDetails(result.answer);
+        const pageContent = parseConfluencePageContent(result.answer);
+        setConfluenceDetails(pageContent ? pageDetails : null);
+        setConfluencePageContent(pageContent);
+        setConfluencePreview(result.answer.split(/\r?\n/).filter((line) => line.startsWith("- ")).map((line) => line.replace(/^[-*]\s+/, "")));
+        if (pageContent && pageDetails) {
+          displayedAnswer = `Selected Confluence page: ${pageDetails.title} (Page ID: ${pageDetails.pageId}). The full page content is available in the details panel.`;
+        }
       }
       setMessages((current) => [
         ...current,
@@ -689,27 +817,43 @@ export function ChatWorkspace() {
 
     const recipient = selectedEmail.senderEmail || selectedEmail.sender.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0];
     if (!recipient) {
-      setStatusMessage("The selected Outlook message does not include a sender email address.");
-      return;
+      const enteredRecipient = window.prompt("Recipient email address:");
+      if (!enteredRecipient?.trim()) {
+        setStatusMessage("A recipient email address is required before sending.");
+        return;
+      }
+      if (!/^[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}$/.test(enteredRecipient.trim())) {
+        setStatusMessage("Enter a valid recipient email address.");
+        return;
+      }
+      return handleSendDraftTo(enteredRecipient.trim(), selectedEmail.subject, activeDetail.draftLines.join("\n"));
     }
 
+    return handleSendDraftTo(recipient, selectedEmail.subject, activeDetail.draftLines.join("\n"));
+  }
+
+  async function handleSendDraftTo(recipient: string, subject: string, body: string) {
+
     try {
-      await sendEmail(
+      const result = await sendEmail(
         recipient,
-        `Re: ${selectedEmail.subject}`,
-        activeDetail.draftLines.join("\n"),
+        `Re: ${subject}`,
+        body,
       );
+      setStatusMessage(`Email sent via ${result.provider} to ${recipient}.`);
       setMessages((current) => [
         ...current,
-        { id: Date.now(), role: "assistant", text: `Draft sent via Outlook to ${recipient}.`, time: getTimestamp() },
+        { id: Date.now(), role: "assistant", text: `Email sent via ${result.provider} to ${recipient}.`, time: getTimestamp() },
       ]);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Outlook could not send the draft.";
+      setStatusMessage(message);
       setMessages((current) => [
         ...current,
         {
           id: Date.now(),
           role: "assistant",
-          text: error instanceof Error ? error.message : "Outlook could not send the draft.",
+          text: message,
           time: getTimestamp(),
         },
       ]);
@@ -721,7 +865,7 @@ export function ChatWorkspace() {
     setStatusMessage("Loading live Jira activity...");
 
     try {
-      const result = await sendMessage("employee-session", "Show my recently updated Jira issues");
+      const result = await sendMessage("employee-session", "Show my recently updated Jira issues", "jira");
       setJiraIssues(parseJiraIssues(result.answer));
       setMessages((current) => [
         ...current,
@@ -748,15 +892,16 @@ export function ChatWorkspace() {
     setSelectedAgent(agentId);
     setWorkspaceHome(false);
     setDetailPanelOpen(true);
-    setMessages(agentId === "email" ? [] : [...(initialMessagesByAgent[agentId] ?? [])]);
+    setMessages(agentId === "email" || agentId === "jira" ? [] : [...(initialMessagesByAgent[agentId] ?? [])]);
     setMessage("");
     setJiraIssues([]);
-    if (agentId !== "email") {
-      setEmailRows([]);
-      setSelectedEmail(null);
-      setEmailActionItems([]);
-      setEmailDraftLines([]);
-    }
+    setConfluenceDetails(null);
+    setConfluencePageContent("");
+    setConfluencePreview([]);
+    setEmailRows([]);
+    setSelectedEmail(null);
+    setEmailActionItems([]);
+    setEmailDraftLines([]);
     setStatusMessage(`${agents.find((agent) => agent.id === agentId)?.name ?? "Workspace"} is ready.`);
     if (agentId === "jira") {
       void loadJiraOverview();
@@ -773,11 +918,101 @@ export function ChatWorkspace() {
     void loadMailboxPreview(true);
   }
 
+  function handleEmailDraft() {
+    if (!selectedEmail) {
+      setStatusMessage("Select an email before drafting a response.");
+      return;
+    }
+
+    const subject = selectedEmail.subject || "the selected email";
+    void submitMessage(`Draft a reply for ${subject}`);
+  }
+
+  function handleEmailSelection(email: EmailRow) {
+    setSelectedEmail(email);
+    setEmailActionItems([]);
+    setEmailDraftLines([]);
+    setStatusMessage(`Preparing a professional reply for ${email.subject}...`);
+    void submitMessage(`Draft a reply for ${email.subject}`);
+  }
+
+  function handleNewEmailDraft() {
+    const instruction = window.prompt("What should the new email say?");
+    if (!instruction?.trim() || isLoading) return;
+    void submitMessage(`Draft a new email: ${instruction.trim()}`);
+  }
+
+  function handleScheduleMeeting() {
+    if (isLoading) return;
+    const subject = window.prompt("Meeting subject:", "Weekly sync");
+    if (!subject?.trim()) return;
+    const start = window.prompt("Start time (YYYY-MM-DD HH:MM):", "2026-09-17 14:00");
+    if (!start?.trim()) return;
+    const duration = window.prompt("Duration in minutes:", "45");
+    if (!duration?.trim() || !/^\d+$/.test(duration.trim())) {
+      setStatusMessage("Enter a duration in minutes before scheduling.");
+      return;
+    }
+    void submitMessage(`Schedule meeting: ${subject.trim()} | ${start.trim()} | ${duration.trim()}`);
+  }
+
+  async function handleEmailSearch() {
+    if (isLoading) return;
+
+    setMessages((current) => [
+      ...current,
+      { id: Date.now(), role: "user", text: "Show all unread mail", time: getTimestamp() },
+    ]);
+    setIsLoading(true);
+
+    try {
+      const result = await getEmailMessages(true);
+      const rows: EmailRow[] = result.messages.map((email) => ({
+        sender: email.sender,
+        senderEmail: email.sender_email,
+        subject: email.subject,
+        priority: email.priority,
+        summary: email.body.slice(0, 240),
+        received: email.received_at || "recently",
+        attachments: email.attachment_names.join(", "),
+      }));
+      setEmailRows(rows);
+      setSelectedEmail(rows[0] ?? null);
+      setEmailActionItems([]);
+      setEmailDraftLines([]);
+      setMessages((current) => [
+        ...current,
+        {
+          id: Date.now() + 1,
+          role: "assistant",
+          text: rows.length
+            ? `Found ${rows.length} unread email${rows.length === 1 ? "" : "s"}. Select a message below to view details.`
+            : "No unread emails matched that search.",
+          time: getTimestamp(),
+        },
+      ]);
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: Date.now() + 1,
+          role: "assistant",
+          text: error instanceof Error ? error.message : "Unable to search unread mail.",
+          time: getTimestamp(),
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   function startNewChat() {
     setMessages([]);
     setMessage("");
     setDocumentSummary("");
     setJiraIssues([]);
+    setConfluenceDetails(null);
+    setConfluencePageContent("");
     setEmailRows([]);
     setSelectedEmail(null);
     setEmailActionItems([]);
@@ -793,13 +1028,26 @@ export function ChatWorkspace() {
     setStatusMessage("A new workspace task widget was added.");
   }
 
-  function copyDraft() {
+  async function copyDraft() {
     const draft = activeDetail.draftLines.join("\n");
-    void navigator.clipboard?.writeText(draft);
-    setStatusMessage("Draft copied to clipboard.");
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard is unavailable");
+      await navigator.clipboard.writeText(draft);
+      setStatusMessage("Draft copied to clipboard.");
+    } catch {
+      setStatusMessage("The draft could not be copied. Use Edit to place it in the composer.");
+    }
   }
 
   function editDraft() {
+    if (!emailDraftLines.length && selectedAgent === "email") {
+      if (selectedEmail) {
+        handleEmailDraft();
+      } else {
+        handleNewEmailDraft();
+      }
+      return;
+    }
     setMessage(activeDetail.draftLines.join("\n"));
     setStatusMessage("Draft loaded into the composer for editing.");
   }
@@ -810,10 +1058,55 @@ export function ChatWorkspace() {
       return;
     }
     if (selectedAgent === "email") {
-      void handleSendDraft();
+      if (!emailDraftLines.length) {
+        if (selectedEmail) {
+          handleEmailDraft();
+        } else {
+          handleNewEmailDraft();
+        }
+        return;
+      }
+      if (selectedEmail) {
+        void handleSendDraft();
+      } else {
+        editDraft();
+      }
+      return;
+    }
+    if (selectedAgent === "confluence") {
+      if (!confluenceDetails) {
+        setStatusMessage("Select a Confluence page before updating it.");
+        return;
+      }
+      const content = window.prompt("Replacement content for the selected Confluence page:", confluencePageContent);
+      if (!content?.trim()) return;
+      void submitMessage(`Update Confluence page ${confluenceDetails.pageId}: ${content.trim()}`);
       return;
     }
     void submitMessage(`Send the current ${activeAgent.name} response.`);
+  }
+
+  function selectConfluencePage(page: ConfluenceResult) {
+    setConfluenceDetails({ title: page.title, pageId: page.pageId, source: "Live Confluence page" });
+    setConfluencePageContent(page.preview);
+    setStatusMessage(`Loading ${page.title}...`);
+    void submitMessage(`Open Confluence page /pages/${page.pageId}`);
+  }
+
+  function startConfluenceCreate() {
+    const title = window.prompt("Confluence page title:");
+    if (!title?.trim()) return;
+    const body = window.prompt("Confluence page content:");
+    if (!body?.trim()) return;
+    void submitMessage(`Create a Confluence page: ${title.trim()} | ${body.trim()}`);
+  }
+
+  function startConfluenceUpdate() {
+    const pageId = window.prompt("Confluence page ID:");
+    if (!pageId?.trim()) return;
+    const body = window.prompt("Replacement page content:");
+    if (!body?.trim()) return;
+    void submitMessage(`Update Confluence page ${pageId.trim()}: ${body.trim()}`);
   }
 
   function handleNavClick(navId: string) {
@@ -874,7 +1167,7 @@ export function ChatWorkspace() {
         <div className="sidebar-header">
           <div className="brand-mark">N</div>
           <div className="brand-copy">
-            <p className="sidebar-label">Northstar Bank</p>
+            <p className="sidebar-label">Nexa Bank</p>
             <h2>Employee Workspace</h2>
           </div>
         </div>
@@ -907,7 +1200,7 @@ export function ChatWorkspace() {
                 <span>{label}</span>
               </button>
             ))}
-            {agents.filter(({ id }) => id !== "knowledge" && id !== "document").map(({ id, name, icon: Icon }) => (
+            {agents.filter(({ id }) => !["knowledge", "document", "jira", "confluence"].includes(id)).map(({ id, name, icon: Icon }) => (
               <button
                 key={`tool-${id}`}
                 type="button"
@@ -945,9 +1238,6 @@ export function ChatWorkspace() {
               <Bell size={18} />
             </button>
             {notificationsOpen && <div className="notification-popover">No new notifications.</div>}
-            <button type="button" className="login-button" onClick={() => setStatusMessage("Login is ready to be connected to your identity provider.")}>
-              Login
-            </button>
           </div>
         </header>
         {statusMessage && <div className="status-message" role="status">{statusMessage}</div>}
@@ -1072,7 +1362,7 @@ export function ChatWorkspace() {
                         <small>{issue.status}</small>
                       </div>
                     ))}
-                    <button type="button" className="text-link" onClick={() => handleSidebarToolClick("jira")}>Open JiraPilot</button>
+                    <button type="button" className="text-link" onClick={() => handleSidebarToolClick("jira")}>Open Jira</button>
                   </div>
 
                   <div className="dashboard-detail-card">
@@ -1087,7 +1377,7 @@ export function ChatWorkspace() {
                     {confluencePreview.slice(0, 2).map((page) => (
                       <div key={page} className="dashboard-detail-item"><span>{page}</span></div>
                     ))}
-                    <button type="button" className="text-link" onClick={() => handleSidebarToolClick("confluence")}>Open Confluence Coach</button>
+                    <button type="button" className="text-link" onClick={() => handleSidebarToolClick("confluence")}>Open Confluence</button>
                   </div>
 
                   <div className="dashboard-detail-card">
@@ -1151,6 +1441,13 @@ export function ChatWorkspace() {
                     setMessages([]);
                     setMessage("");
                     setDocumentSummary("");
+                    setJiraIssues([]);
+                    setConfluenceDetails(null);
+                    setConfluencePreview([]);
+                    setEmailRows([]);
+                    setSelectedEmail(null);
+                    setEmailActionItems([]);
+                    setEmailDraftLines([]);
                     setStatusMessage(selectedAgent === "document" ? "Document analyzer cleared." : "Chat cleared.");
                   }}>
                     <MessageSquareText size={16} />
@@ -1196,6 +1493,32 @@ export function ChatWorkspace() {
                           ))}
                           {!jiraIssues.length && <p className="jira-empty-state">Jira issues could not be formatted.</p>}
                         </div>
+                      ) : selectedAgent === "confluence" && messageItem.role === "assistant" && messageItem.text.includes("### Confluence Pages") ? (
+                        <div className="confluence-results">
+                          <div className="confluence-results-heading">
+                            <span>Recent Confluence pages</span>
+                            <strong>{parseConfluenceResults(messageItem.text).length}</strong>
+                          </div>
+                          {parseConfluenceResults(messageItem.text).map((page) => (
+                            <button
+                              key={`${messageItem.id}-${page.pageId}`}
+                              type="button"
+                              className={`confluence-result-card${confluenceDetails?.pageId === page.pageId ? " selected" : ""}`}
+                              aria-label={`Select Confluence page ${page.title}`}
+                              onClick={() => selectConfluencePage(page)}
+                            >
+                              <div className="confluence-result-copy">
+                                <span className="confluence-result-label">CONFLUENCE PAGE</span>
+                                <h4>{page.title}</h4>
+                                <p>{page.preview}</p>
+                                <span className="confluence-result-id">Page ID: {page.pageId}</span>
+                              </div>
+                              <span className="secondary-button">
+                                Select page
+                              </span>
+                            </button>
+                          ))}
+                        </div>
                       ) : (
                         <p className="message-text">{messageItem.text}</p>
                       )}
@@ -1215,11 +1538,7 @@ export function ChatWorkspace() {
                                 key={`${email.sender}-${email.subject}`}
                                 type="button"
                                 className="summary-row"
-                                onClick={() => {
-                                  setSelectedEmail(email);
-                                  setEmailActionItems([]);
-                                  setEmailDraftLines([]);
-                                }}
+                                onClick={() => handleEmailSelection(email)}
                               >
                                 <span>{email.sender}</span>
                                 <span>{email.subject}</span>
@@ -1268,17 +1587,25 @@ export function ChatWorkspace() {
                   </div>
                 ) : selectedAgent === "email" ? (
                   <>
+                    <button type="button" className="chip-button" onClick={handleNewEmailDraft} disabled={isLoading}>
+                      <PencilLine size={16} />
+                      Draft Email
+                    </button>
+                    <button type="button" className="chip-button" onClick={handleEmailDraft}>
+                      <PencilLine size={16} />
+                      Draft Response
+                    </button>
                     <button type="button" className="chip-button" onClick={() => void submitMessage("Only show high priority messages.")}>
                       <ShieldCheck size={16} />
-                      Show High Priority Only
+                      High Priority Emails Only
                     </button>
                     <button type="button" className="chip-button" onClick={() => void submitMessage("Show emails with attachments.")}>
                       <Mail size={16} />
-                      Show Attachments
+                      Mail With Attachments
                     </button>
-                    <button type="button" className="chip-button" onClick={() => setMessage("Search emails for ")}>
+                    <button type="button" className="chip-button" onClick={() => void handleEmailSearch()} disabled={isLoading}>
                       <Mail size={16} />
-                      Search Emails
+                      Search Unread Mail
                     </button>
                   </>
                 ) : selectedAgent === "meeting" ? (
@@ -1294,7 +1621,8 @@ export function ChatWorkspace() {
                     <button
                       type="button"
                       className="chip-button"
-                      onClick={() => setMessage("Schedule meeting: Weekly sync | 2026-09-16 14:00 | 45")}
+                      onClick={handleScheduleMeeting}
+                      disabled={isLoading}
                     >
                       <PencilLine size={16} />
                       Schedule Meeting
@@ -1302,17 +1630,64 @@ export function ChatWorkspace() {
                   </>
                 ) : selectedAgent === "jira" ? (
                   <>
-                    <button type="button" className="chip-button" onClick={() => setMessage("Create a task: ")}>
+                    <button type="button" className="chip-button" onClick={() => void submitMessage("Show Jira stories") }>
+                      <BriefcaseBusiness size={16} />
+                      Show Jira Stories
+                    </button>
+                    <button type="button" className="chip-button" onClick={() => void submitMessage("Show Jira tasks")}>
+                      <CheckCheck size={16} />
+                      Show Jira Tasks
+                    </button>
+                    <button type="button" className="chip-button" onClick={() => void submitMessage("Show my assigned Jira issues")}>
+                      <ShieldCheck size={16} />
+                      My Assigned Work
+                    </button>
+                    <button type="button" className="chip-button" onClick={() => void submitMessage("Show recent Jira sprint items")}>
+                      <CalendarDays size={16} />
+                      Recent Sprint Items
+                    </button>
+                    <button type="button" className="chip-button" onClick={() => void submitMessage("Show open Jira blockers")}>
+                      <ShieldCheck size={16} />
+                      Show open Jira blockers
+                    </button>
+                    <button type="button" className="chip-button" onClick={() => void submitMessage("Show Jira bugs")}>
+                      <BriefcaseBusiness size={16} />
+                      Show Jira bugs
+                    </button>
+                    <button type="button" className="chip-button" onClick={() => void submitMessage("Show current sprint status")}>
+                      <CalendarDays size={16} />
+                      Show current sprint status
+                    </button>
+                    <button type="button" className="chip-button" onClick={() => void submitMessage("Show Jira sprint summary")}>
+                      <BriefcaseBusiness size={16} />
+                      Sprint Summary
+                    </button>
+                    <button type="button" className="chip-button" onClick={() => setMessage("Create a task: Add the next action item for this sprint.")}>
                       <Plus size={16} />
                       Create Task
                     </button>
-                    <button type="button" className="chip-button" onClick={() => setMessage("Create a user story: ")}>
+                    <button type="button" className="chip-button" onClick={() => setMessage("Create a user story: As a banker, I want to review the next priority item so that I can take action quickly.")}>
                       <PencilLine size={16} />
                       Create User Story
                     </button>
-                    <button type="button" className="chip-button" onClick={() => setMessage("Analyze story: ")}>
+                    <button type="button" className="chip-button" onClick={() => setMessage("Analyze story: As a banker, I want to review the high-priority task so that I can resolve the issue quickly.")}>
                       <CheckCheck size={16} />
                       Analyze Story
+                    </button>
+                  </>
+                ) : selectedAgent === "confluence" ? (
+                  <>
+                    <button type="button" className="chip-button" onClick={() => void submitMessage("Search Confluence pages for recent workspace updates.")}>
+                      <BookOpen size={16} />
+                      Search Recent Pages
+                    </button>
+                    <button type="button" className="chip-button" onClick={startConfluenceCreate} disabled={isLoading}>
+                      <Plus size={16} />
+                      Create Page
+                    </button>
+                    <button type="button" className="chip-button" onClick={startConfluenceUpdate} disabled={isLoading}>
+                      <PencilLine size={16} />
+                      Update Page
                     </button>
                   </>
                 ) : null}
@@ -1386,24 +1761,6 @@ export function ChatWorkspace() {
                 <p className="summary-copy">{activeDetail.summary}</p>
               </div>
 
-              <div className="detail-card">
-                <div className="detail-header">
-                  <div className="detail-heading">
-                    <CheckCheck size={16} />
-                    <span>Action Items</span>
-                  </div>
-                </div>
-
-                <ol className="action-list">
-                  {activeDetail.actionItems.map((item, index) => (
-                    <li key={item} className="action-item">
-                      <span className="action-index">{index + 1}</span>
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-
               <div className="detail-card draft-card">
                 <div className="detail-header">
                   <div className="detail-heading">
@@ -1433,7 +1790,11 @@ export function ChatWorkspace() {
                     onClick={handleUtilityAction}
                   >
                     <ArrowRight size={16} />
-                    {selectedAgent === "email" ? "Send via Outlook" : selectedAgent === "meeting" ? "Open Microsoft Teams" : `Send via ${activeAgent.name}`}
+                    {selectedAgent === "email"
+                      ? emailDraftLines.length
+                        ? selectedEmail ? "Send via Outlook" : "Edit Draft"
+                        : selectedEmail ? "Draft Response" : "Draft Email"
+                      : selectedAgent === "meeting" ? "Open Microsoft Teams" : selectedAgent === "confluence" ? "Update selected page" : `Send via ${activeAgent.name}`}
                   </button>
                 </div>
               </div>

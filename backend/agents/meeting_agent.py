@@ -156,7 +156,7 @@ def create_outlook_appointment(subject: str, start: datetime, duration_minutes: 
             appointment.Location = "Microsoft Teams"
             appointment.BusyStatus = 2
             appointment.ReminderSet = True
-            appointment.Body = "Created by Northstar Bank Workspace."
+            appointment.Body = "Created by Nexa Bank Workspace."
             appointment.Save()
             return
         except Exception:  # fallback to Graph or workspace calendar below

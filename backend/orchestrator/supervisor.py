@@ -17,6 +17,7 @@ from backend.knowledge.retriever import KnowledgeRetriever
 class SupervisorState(TypedDict, total=False):
     session_id: str
     message: str
+    agent: str | None
     route: str
     agent_name: str
     sources: list[str]
@@ -25,6 +26,19 @@ class SupervisorState(TypedDict, total=False):
 
 
 def classify_request(state: SupervisorState) -> SupervisorState:
+    requested_agent = (state.get("agent") or "").casefold()
+    explicit_routes = {
+        "email": "email",
+        "meeting": "meeting",
+        "jira": "jira_confluence",
+        "confluence": "confluence",
+        "document": "document",
+        "knowledge": "document",
+        "assistant": "assistant",
+    }
+    if requested_agent in explicit_routes:
+        return {"route": explicit_routes[requested_agent]}
+
     message = state["message"].lower()
 
     if any(term in message for term in ("email", "outlook", "mailmate", "mailbox", "inbox", "send", "reply", "draft")) or re.search(
@@ -48,7 +62,11 @@ def classify_request(state: SupervisorState) -> SupervisorState:
 
 
 def retrieve_knowledge(state: SupervisorState) -> SupervisorState:
-    if state.get("route") == "assistant":
+    if state.get("route") == "assistant" or (
+        state.get("route") == "confluence"
+        and "recent" in state["message"].casefold()
+        and "page" in state["message"].casefold()
+    ):
         return {"sources": [], "passages": []}
     chunks = KnowledgeRetriever().search(state["message"])
     return {
@@ -79,11 +97,24 @@ def route_agent(state: SupervisorState) -> SupervisorState:
         "email": EmailAgent(),
         "meeting": MeetingAgent(),
         "jira_confluence": JiraConfluenceAgent(),
+        "confluence": JiraConfluenceAgent(),
         "document": DocumentAgent(),
     }
 
     agent = agent_map.get(route, AssistantAgent())
-    response = agent.run(type("Context", (), {"session_id": state.get("session_id", ""), "message": state.get("message", "")})())
+    response = agent.run(
+        type(
+            "Context",
+            (),
+            {
+                "session_id": state.get("session_id", ""),
+                "message": state.get("message", ""),
+                "agent": route,
+                "retrieved_sources": state.get("sources", []),
+                "retrieved_chunks": state.get("passages", []),
+            },
+        )()
+    )
 
     if route == "document" and not state.get("passages"):
         response = "No approved policy guidance matched. Add approved documents to data/knowledge_base."
@@ -131,12 +162,12 @@ class Supervisor:
     def __init__(self) -> None:
         self.graph = build_graph()
 
-    def handle(self, session_id: str, message: str) -> str:
-        result = self.graph.invoke({"session_id": session_id, "message": message})
+    def handle(self, session_id: str, message: str, agent: str | None = None) -> str:
+        result = self.graph.invoke({"session_id": session_id, "message": message, "agent": agent})
         return result.get("response", "")
 
-    def handle_with_metadata(self, session_id: str, message: str) -> dict[str, str]:
-        result = self.graph.invoke({"session_id": session_id, "message": message})
+    def handle_with_metadata(self, session_id: str, message: str, agent: str | None = None) -> dict[str, str]:
+        result = self.graph.invoke({"session_id": session_id, "message": message, "agent": agent})
         return {
             "route": result.get("agent_name", "assistant"),
             "response": result.get("response", ""),

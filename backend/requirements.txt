@@ -6,6 +6,7 @@ pytest
 langchain-community
 atlassian-python-api
 langgraph
+langsmith
 azure-identity
 azure-search-documents
 azure-storage-blob
@@ -22,5 +23,6 @@ pytesseract
 chromadb
 faiss-cpu
 numpy
+psycopg[binary]
 pywin32
 msal
