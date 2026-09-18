@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Frontend
+node_modules/
+dist/
+build/
+.next/
+
+# Local data and artifacts
+data/vector_store/*
+!data/vector_store/.gitkeep
+*.log
+
+# IDE
+.vscode/*.local.json

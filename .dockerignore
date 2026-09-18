@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+venv
+__pycache__
+*.pyc
+.pytest_cache
+frontend/node_modules
+frontend/.next
+data/vector_store/*
+!data/vector_store/.gitkeep

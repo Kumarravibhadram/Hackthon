@@ -1,0 +1,71 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      APP_ENV: development
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      FRONTEND_ORIGIN: http://localhost:3000
+      REDIS_URL: redis://redis:6379/0
+      VECTOR_STORE_BACKEND: chroma
+      VECTOR_STORE_PATH: /app/data/vector_store
+      VECTOR_COLLECTION: banking_knowledge
+      AZURE_SEARCH_ENDPOINT: ${AZURE_SEARCH_ENDPOINT:-}
+      AZURE_SEARCH_INDEX: ${AZURE_SEARCH_INDEX:-}
+      AZURE_SEARCH_KEY: ${AZURE_SEARCH_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_EMBEDDING_DIMENSION: ${OPENAI_EMBEDDING_DIMENSION:-1536}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-common}
+      GRAPH_SCOPES: ${GRAPH_SCOPES:-Calendars.ReadWrite User.Read}
+      GRAPH_TOKEN_CACHE_PATH: /app/data/graph_token_cache.json
+      GRAPH_TIMEZONE: ${GRAPH_TIMEZONE:-UTC}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+    ports:
+      - "3000:3000"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bankai -d bankai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  redis_data:
+  frontend_node_modules:
+  frontend_next:

@@ -1,0 +1,20 @@
+BANKING EMPLOYEE PRODUCTIVITY – RAG POC CORPUS
+
+Documents are structured as enterprise banking artifacts for testing ingestion,
+retrieval, cross-document reasoning, functional analysis and technical analysis.
+
+Recommended metadata:
+document_id, document_type, domain, project, department, owner, version,
+status, effective_date, confidentiality, source_system.
+
+Example RAG questions:
+- What is the end-to-end payment flow?
+- What are the payment platform dependencies?
+- What decisions were made in the latest project review?
+- What risks and actions are currently open?
+- What are the functional requirements of the AI copilot?
+- What are the KYC manual-review triggers?
+- Which APIs are exposed by the Core Banking Adapter?
+- Create a functional view of account opening.
+- Create a technical view of payment processing.
+- Create an executive summary using requirements, architecture and project status.
